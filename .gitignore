@@ -1,0 +1,4 @@
+/cifar/data/
+/cifar/ckpt/
+/cifar/output/
+.idea/
