@@ -92,9 +92,11 @@ def evaluate():
     base_model = load_model(args.arch, args.ckpt_dir,
                             args.dataset, ThreatModel.corruptions).cuda()
     if args.adaptation == "source":
+        # do not adaption
         base_model.eval()
         model = base_model
     elif args.adaptation == "norm":
+        # update statistic parameters with adaption
         model = norm.Norm(base_model)
     elif args.adaptation == "cotta":
         base_model = cotta.configure_model(base_model)
@@ -107,6 +109,7 @@ def evaluate():
                             rst_m=args.rst,
                             ap=args.ap)
     elif args.adaptation == "tent":
+
         base_model = tent.configure_model(base_model)
         params, param_names = tent.collect_params(base_model)
         optimizer = setup_optimizer(params)
@@ -116,6 +119,7 @@ def evaluate():
                           alpha=args.alpha,
                           criterion=args.criterion)
     elif args.adaptation == "eata":
+        
         fisher_dataset = eval("datasets." + f"{args.dataset}".upper())(args.data_dir, transform=transforms.ToTensor())
         sampled_indices = torch.randperm(len(fisher_dataset))[:args.fisher_size]
         sampler = SubsetRandomSampler(sampled_indices)
