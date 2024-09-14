@@ -47,8 +47,10 @@ class OSTTA_EMA(nn.Module):
     
     def update_model0(self):
         with torch.no_grad():
-            for param0, param in zip(self.model0.parameters(), self.model.parameters()):
-                param0.copy_(self.gamma * param0 + (1 - self.gamma) * param)
+            averaged_model_params = {}
+            for key in self.model0.state_dict().keys():
+                averaged_model_params[key] = (self.gamma*self.model0.state_dict()[key] + (1-self.gamma) * self.model.state_dict()[key]) 
+            self.model0.load_state_dict(averaged_model_params)
 
 
     def reset(self):

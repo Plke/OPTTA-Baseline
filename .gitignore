@@ -3,3 +3,5 @@
 /cifar/output/
 .idea/
 __pycache__/
+test.ipynb
+cifar/.ipynb_checkpoints/
