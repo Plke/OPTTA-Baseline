@@ -22,6 +22,7 @@ import eata
 import ostta
 import norm
 import tent
+import ostta_ema
 from data import load_svhn, load_svhn_c
 from utils import AverageMeter, get_logger, set_random_seed
 
@@ -153,6 +154,16 @@ def evaluate():
         params, param_names = ostta.collect_params(base_model)
         optimizer = setup_optimizer(params)
         model = ostta.OSTTA(base_model, optimizer,
+                            steps=args.steps,
+                            episodic=args.episodic,
+                            alpha=args.alpha,
+                            criterion=args.criterion)
+        
+    elif args.adaptation == "ostta_ema":
+        base_model = ostta_ema.configure_model(base_model)
+        params, param_names = ostta_ema.collect_params(base_model)
+        optimizer = setup_optimizer(params)
+        model = ostta_ema.OSTTA_EMA(base_model, optimizer,
                             steps=args.steps,
                             episodic=args.episodic,
                             alpha=args.alpha,
