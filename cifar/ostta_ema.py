@@ -12,7 +12,7 @@ class OSTTA_EMA(nn.Module):
 
     Once tented, a model adapts itself by updating on every forward.
     """
-    def __init__(self, model, optimizer, steps=1, episodic=False, alpha=[0.5], criterion="ent"):
+    def __init__(self, model, optimizer, steps=1, episodic=False, alpha=[0.5], criterion="ent",gamma=0.99):
         super().__init__()
         self.model = model
         self.optimizer = optimizer
@@ -20,6 +20,7 @@ class OSTTA_EMA(nn.Module):
         assert steps > 0, "tent requires >= 1 step(s) to forward and update"
         self.episodic = episodic
         self.alpha = alpha
+        self.gamma = gamma
         self.criterion = criterion
 
         self.model0 = deepcopy(self.model)
@@ -40,9 +41,14 @@ class OSTTA_EMA(nn.Module):
 
   
         # 先使用EMA更新原模型
-        self.model0=0.99*self.model0+0.01*self.model
+        self.update_model0()
 
         return outputs
+    
+    def update_model0(self):
+        with torch.no_grad():
+            for param0, param in zip(self.model0.parameters(), self.model.parameters()):
+                param0.copy_(self.gamma * param0 + (1 - self.gamma) * param)
 
 
     def reset(self):

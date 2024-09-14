@@ -33,7 +33,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--arch", default="Hendrycks2020AugMix_WRN",
                     choices=["Standard", "Hendrycks2020AugMix_WRN", "Hendrycks2020AugMix_ResNeXt"])
 parser.add_argument("--adaptation", default="source",
-                    choices=["source", "norm", "cotta", "tent", "eata", "ostta"])
+                    choices=["source", "norm", "cotta", "tent", "eata", "ostta","ostta_ema"])
 parser.add_argument("--episodic", action="store_true")
 # Corruption options
 parser.add_argument("--dataset", default="cifar10", choices=["cifar10", "cifar100"])
@@ -59,6 +59,7 @@ parser.add_argument("--rst", default=0.01, type=float)
 parser.add_argument("--ap", default=0.92, type=float)
 # Tent options
 parser.add_argument("--alpha", nargs="+", default=[0.5], type=float)
+parser.add_argument("--gamma",default=0.99,type=float)
 parser.add_argument("--criterion", default="ent", choices=["ent", "ent_ind", "ent_ind_ood", "ent_unf"])
 parser.add_argument("--rounds", default=1, type=int)
 # EATA options
@@ -74,8 +75,8 @@ args.type = ["gaussian_noise", "shot_noise", "impulse_noise",
              "snow", "frost", "fog", "brightness", "contrast",
              "elastic_transform", "pixelate", "jpeg_compression"]
 args.severity = [5]
-args.log_dest = "{}_{}_lr_{}_alpha_{}_{}.txt".format(
-    args.adaptation, args.dataset, args.lr, "_".join(str(alpha) for alpha in args.alpha), args.criterion)
+args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}.txt".format(
+    args.adaptation, args.dataset, args.lr, "_".join(str(alpha) for alpha in args.alpha), args.criterion,args.gamma)
 args.ap = 0.92 if args.dataset == "cifar10" else 0.72
 args.e_margin = math.log(10)*0.40 if args.dataset == "cifar10" else math.log(100)*0.40
 args.d_margin = 0.4 if args.dataset == "cifar10" else 0.1
