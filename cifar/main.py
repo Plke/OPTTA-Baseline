@@ -59,7 +59,8 @@ parser.add_argument("--rst", default=0.01, type=float)
 parser.add_argument("--ap", default=0.92, type=float)
 # Tent options
 parser.add_argument("--alpha", nargs="+", default=[0.5], type=float)
-parser.add_argument("--gamma",default=0.99,type=float)
+
+
 parser.add_argument("--criterion", default="ent", choices=["ent", "ent_ind", "ent_ind_ood", "ent_unf"])
 parser.add_argument("--rounds", default=1, type=int)
 # EATA options
@@ -67,6 +68,10 @@ parser.add_argument("--fisher_size", default=2000, type=int)
 parser.add_argument("--fisher_alpha", default=1., type=float)
 parser.add_argument("--e_margin", default=math.log(10)*0.40, type=float)
 parser.add_argument("--d_margin", default=0.05, type=float)
+
+#EMA options
+parser.add_argument("--gamma",default=0.99,type=float)
+
 
 args = parser.parse_args()
 
