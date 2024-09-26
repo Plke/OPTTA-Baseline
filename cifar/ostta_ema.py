@@ -12,7 +12,17 @@ class OSTTA_EMA(nn.Module):
 
     Once tented, a model adapts itself by updating on every forward.
     """
-    def __init__(self, model, optimizer, steps=1, episodic=False, alpha=[0.5], criterion="ent",gamma=0.99):
+
+    def __init__(
+        self,
+        model,
+        optimizer,
+        steps=1,
+        episodic=False,
+        alpha=[0.5],
+        criterion="ent",
+        gamma=0.99,
+    ):
         super().__init__()
         self.model = model
         self.optimizer = optimizer
@@ -29,35 +39,96 @@ class OSTTA_EMA(nn.Module):
 
         # note: if the model is never reset, like for continual adaptation,
         # then skipping the state copy would save memory
-        self.model_state, self.optimizer_state = \
-            copy_model_and_optimizer(self.model, self.optimizer)
+        self.model_state, self.optimizer_state = copy_model_and_optimizer(
+            self.model, self.optimizer
+        )
 
     def forward(self, x):
         if self.episodic:
             self.reset()
 
         for _ in range(self.steps):
-            outputs = forward_and_adapt(x, self.model0, self.model, self.optimizer, self.alpha, self.criterion)
-
-  
-        # 先使用EMA更新原模型
-        self.update_model0()
+            outputs = self.forward_and_adapt(
+                x, self.optimizer, self.alpha, self.criterion
+            )
 
         return outputs
-    
-    def update_model0(self):
-        with torch.no_grad():
-            averaged_model_params = {}
-            for key in self.model0.state_dict().keys():
-                averaged_model_params[key] = (self.gamma*self.model0.state_dict()[key] + (1-self.gamma) * self.model.state_dict()[key]) 
-            self.model0.load_state_dict(averaged_model_params)
-
 
     def reset(self):
         if self.model_state is None or self.optimizer_state is None:
             raise Exception("cannot reset without saved model/optimizer state")
-        load_model_and_optimizer(self.model, self.optimizer,
-                                 self.model_state, self.optimizer_state)
+        load_model_and_optimizer(
+            self.model, self.optimizer, self.model_state, self.optimizer_state
+        )
+
+    @torch.enable_grad()  # ensure grads in possible no grad context for testing
+    def forward_and_adapt(self, x, optimizer, alpha, criterion):
+        """Forward and adapt model on batch of data.
+
+        Measure entropy of the model prediction, take gradients, and update params.
+        """
+        # forward
+        outputs0 = self.model0(x)
+        outputs0 = outputs0.softmax(1)
+        values0, indices0 = outputs0.max(1)
+        outputs = self.model(x)
+        outputs_ = outputs.softmax(1)
+        values = outputs_[torch.arange(outputs0.size(0)), indices0]
+        if criterion != "ent":
+            model1 = deepcopy(self.model0)
+            model1.fc = nn.Identity()
+            cos_sim = F.cosine_similarity(
+                model1(x).unsqueeze(1), self.model.fc.weight, dim=2
+            )
+            max_cos_sim, _ = cos_sim.max(1)
+            min_value = max_cos_sim.min()
+            max_value = max_cos_sim.max()
+            max_cos_sim = (max_cos_sim - min_value) / (max_value - min_value)
+            os = 1 - max_cos_sim
+            gm = GaussianMixture(n_components=2).fit(
+                os.detach().cpu().numpy().reshape(-1, 1)
+            )
+            if criterion != "ent_unf":
+                filter_ids = gm.predict(os.detach().cpu().numpy().reshape(-1, 1))
+                filter_ids = (
+                    filter_ids if gm.means_[0, 0] < gm.means_[1, 0] else 1 - filter_ids
+                )
+            else:
+                weight = gm.predict_proba(os.detach().cpu().numpy().reshape(-1, 1))
+                weight = weight if gm.means_[0, 0] < gm.means_[1, 0] else 1 - weight
+        # adapt
+        entropys = softmax_entropy(outputs)
+        if criterion != "ent":
+            if criterion != "ent_unf":
+                entropys_ind = entropys[filter_ids == 0]
+                loss = entropys_ind[
+                    values[filter_ids == 0] >= values0[filter_ids == 0]
+                ].mean(0)
+            else:
+                entropys_ind = entropys.mul(
+                    torch.from_numpy(weight[:, 0]).to(entropys.device)
+                )
+                loss = entropys_ind[values >= values0].mean(0)
+            if criterion != "ent_ind":
+                if criterion != "ent_unf":
+                    entropys_ood = entropys[filter_ids == 1]
+                else:
+                    entropys_ood = entropys.mul(
+                        torch.from_numpy(weight[:, 1]).to(entropys.device)
+                    )
+                loss -= alpha[1] * entropys_ood.mean(0)
+        else:
+            loss = entropys[values >= values0].mean(0)
+
+        loss -= alpha[0] * softmax_mean_entropy(outputs)
+
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        # update ema-model
+        self.model0 = update_ema_variables(self.model0, self.model, self.gamma)
+
+        return outputs
 
 
 @torch.jit.script
@@ -73,58 +144,13 @@ def softmax_mean_entropy(x: torch.Tensor) -> torch.Tensor:
     return -(x * torch.log(x)).sum()
 
 
-@torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, model0, model, optimizer, alpha, criterion):
-    """Forward and adapt model on batch of data.
-
-    Measure entropy of the model prediction, take gradients, and update params.
-    """
-    # forward
-    outputs0 = model0(x)
-    outputs0 = outputs0.softmax(1)
-    values0, indices0 = outputs0.max(1)
-    outputs = model(x)
-    outputs_ = outputs.softmax(1)
-    values = outputs_[torch.arange(outputs0.size(0)), indices0]
-    if criterion != "ent":
-        model1 = deepcopy(model0)
-        model1.fc = nn.Identity()
-        cos_sim = F.cosine_similarity(model1(x).unsqueeze(1), model.fc.weight, dim=2)
-        max_cos_sim, _ = cos_sim.max(1)
-        min_value = max_cos_sim.min()
-        max_value = max_cos_sim.max()
-        max_cos_sim = (max_cos_sim - min_value) / (max_value - min_value)
-        os = 1 - max_cos_sim
-        gm = GaussianMixture(n_components=2).fit(os.detach().cpu().numpy().reshape(-1, 1))
-        if criterion != "ent_unf":
-            filter_ids = gm.predict(os.detach().cpu().numpy().reshape(-1, 1))
-            filter_ids = filter_ids if gm.means_[0, 0] < gm.means_[1, 0] else 1 - filter_ids
-        else:
-            weight = gm.predict_proba(os.detach().cpu().numpy().reshape(-1, 1))
-            weight = weight if gm.means_[0, 0] < gm.means_[1, 0] else 1 - weight
-    # adapt
-    entropys = softmax_entropy(outputs)
-    if criterion != "ent":
-        if criterion != "ent_unf":
-            entropys_ind = entropys[filter_ids == 0]
-            loss = entropys_ind[values[filter_ids == 0] >= values0[filter_ids == 0]].mean(0)
-        else:
-            entropys_ind = entropys.mul(torch.from_numpy(weight[:, 0]).to(entropys.device))
-            loss = entropys_ind[values >= values0].mean(0)
-        if criterion != "ent_ind":
-            if criterion != "ent_unf":
-                entropys_ood = entropys[filter_ids == 1]
-            else:
-                entropys_ood = entropys.mul(torch.from_numpy(weight[:, 1]).to(entropys.device))
-            loss -= alpha[1] * entropys_ood.mean(0)
-    else:
-        loss = entropys[values >= values0].mean(0)
-    loss -= alpha[0] * softmax_mean_entropy(outputs)
-    
-    loss.backward()
-    optimizer.step()
-    optimizer.zero_grad()
-    return outputs
+def update_ema_variables(ema_model, model, alpha_teacher):
+    for ema_param, param in zip(ema_model.parameters(), model.parameters()):
+        ema_param.data[:] = (
+            alpha_teacher * ema_param[:].data[:]
+            + (1 - alpha_teacher) * param[:].data[:]
+        )
+    return ema_model
 
 
 def collect_params(model):
@@ -140,7 +166,7 @@ def collect_params(model):
     for nm, m in model.named_modules():
         if isinstance(m, nn.BatchNorm2d):
             for np, p in m.named_parameters():
-                if np in ['weight', 'bias']:  # weight is scale, bias is shift
+                if np in ["weight", "bias"]:  # weight is scale, bias is shift
                     params.append(p)
                     names.append(f"{nm}.{np}")
     return params, names
@@ -183,9 +209,9 @@ def check_model(model):
     param_grads = [p.requires_grad for p in model.parameters()]
     has_any_params = any(param_grads)
     has_all_params = all(param_grads)
-    assert has_any_params, "tent needs params to update: " \
-                           "check which require grad"
-    assert not has_all_params, "tent should not update all params: " \
-                               "check which require grad"
+    assert has_any_params, "tent needs params to update: " "check which require grad"
+    assert not has_all_params, (
+        "tent should not update all params: " "check which require grad"
+    )
     has_bn = any([isinstance(m, nn.BatchNorm2d) for m in model.modules()])
     assert has_bn, "tent needs normalization for its optimization"

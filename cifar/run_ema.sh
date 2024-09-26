@@ -17,7 +17,7 @@ done
 
 
 # Tent, EATA, OSTTA
-for gamma in 1 0.9 0.95 0.99 0.995 0.999 ; do
+for gamma in 1 0.9 0.95 0.99 0.995 0.999 0.9999 0.99999 ; do
   CUDA_VISIBLE_DEVICES=$gpu python main.py --adaptation ostta_ema --gamma $gamma --dataset $dataset --save_dir "./output/ema" 
 done
 
