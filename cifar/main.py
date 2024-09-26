@@ -23,6 +23,7 @@ import ostta
 import norm
 import tent
 import ostta_ema
+import kmeans
 from data import load_svhn, load_svhn_c
 from utils import AverageMeter, get_logger, set_random_seed
 
@@ -30,10 +31,16 @@ from utils import AverageMeter, get_logger, set_random_seed
 parser = argparse.ArgumentParser()
 
 # Model options
-parser.add_argument("--arch", default="Hendrycks2020AugMix_WRN",
-                    choices=["Standard", "Hendrycks2020AugMix_WRN", "Hendrycks2020AugMix_ResNeXt"])
-parser.add_argument("--adaptation", default="source",
-                    choices=["source", "norm", "cotta", "tent", "eata", "ostta","ostta_ema"])
+parser.add_argument(
+    "--arch",
+    default="Hendrycks2020AugMix_WRN",
+    choices=["Standard", "Hendrycks2020AugMix_WRN", "Hendrycks2020AugMix_ResNeXt"],
+)
+parser.add_argument(
+    "--adaptation",
+    default="kmeans",
+    choices=["source", "norm", "cotta", "tent", "eata", "ostta", "ostta_ema","kmeans"],
+)
 parser.add_argument("--episodic", action="store_true")
 # Corruption options
 parser.add_argument("--dataset", default="cifar10", choices=["cifar10", "cifar100"])
@@ -58,32 +65,55 @@ parser.add_argument("--mt", default=0.999, type=float)
 parser.add_argument("--rst", default=0.01, type=float)
 parser.add_argument("--ap", default=0.92, type=float)
 # Tent options
-parser.add_argument("--alpha", nargs="+", default=[0.5], type=float)
+parser.add_argument("--alpha", nargs="+", default=[0.5,0.5], type=float)
 
 
-parser.add_argument("--criterion", default="ent", choices=["ent", "ent_ind", "ent_ind_ood", "ent_unf"])
+parser.add_argument(
+    "--criterion", default="ent", choices=["ent", "ent_ind", "ent_ind_ood", "ent_unf"]
+)
 parser.add_argument("--rounds", default=1, type=int)
 # EATA options
 parser.add_argument("--fisher_size", default=2000, type=int)
-parser.add_argument("--fisher_alpha", default=1., type=float)
-parser.add_argument("--e_margin", default=math.log(10)*0.40, type=float)
+parser.add_argument("--fisher_alpha", default=1.0, type=float)
+parser.add_argument("--e_margin", default=math.log(10) * 0.40, type=float)
 parser.add_argument("--d_margin", default=0.05, type=float)
 
-#EMA options
-parser.add_argument("--gamma",default=0.99,type=float)
+# EMA options
+parser.add_argument("--gamma", default=0.99, type=float)
 
 
 args = parser.parse_args()
 
-args.type = ["gaussian_noise", "shot_noise", "impulse_noise",
-             "defocus_blur", "glass_blur", "motion_blur", "zoom_blur",
-             "snow", "frost", "fog", "brightness", "contrast",
-             "elastic_transform", "pixelate", "jpeg_compression"]
+args.type = [
+    "gaussian_noise",
+    "shot_noise",
+    "impulse_noise",
+    "defocus_blur",
+    "glass_blur",
+    "motion_blur",
+    "zoom_blur",
+    "snow",
+    "frost",
+    "fog",
+    "brightness",
+    "contrast",
+    "elastic_transform",
+    "pixelate",
+    "jpeg_compression",
+]
 args.severity = [5]
 args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}.txt".format(
-    args.adaptation, args.dataset, args.lr, "_".join(str(alpha) for alpha in args.alpha), args.criterion,args.gamma)
+    args.adaptation,
+    args.dataset,
+    args.lr,
+    "_".join(str(alpha) for alpha in args.alpha),
+    args.criterion,
+    args.gamma,
+)
 args.ap = 0.92 if args.dataset == "cifar10" else 0.72
-args.e_margin = math.log(10)*0.40 if args.dataset == "cifar10" else math.log(100)*0.40
+args.e_margin = (
+    math.log(10) * 0.40 if args.dataset == "cifar10" else math.log(100) * 0.40
+)
 args.d_margin = 0.4 if args.dataset == "cifar10" else 0.1
 
 g_pathmgr.mkdirs(args.save_dir)
@@ -96,8 +126,9 @@ logger.info(f"args:\n{args}")
 
 def evaluate():
     # configure model
-    base_model = load_model(args.arch, args.ckpt_dir,
-                            args.dataset, ThreatModel.corruptions).cuda()
+    base_model = load_model(
+        args.arch, args.ckpt_dir, args.dataset, ThreatModel.corruptions
+    ).cuda()
     if args.adaptation == "source":
         # do not adaption
         base_model.eval()
@@ -109,28 +140,38 @@ def evaluate():
         base_model = cotta.configure_model(base_model)
         params, param_names = cotta.collect_params(base_model)
         optimizer = setup_optimizer(params)
-        model = cotta.CoTTA(base_model, optimizer,
-                            steps=args.steps,
-                            episodic=args.episodic,
-                            mt_alpha=args.mt,
-                            rst_m=args.rst,
-                            ap=args.ap)
+        model = cotta.CoTTA(
+            base_model,
+            optimizer,
+            steps=args.steps,
+            episodic=args.episodic,
+            mt_alpha=args.mt,
+            rst_m=args.rst,
+            ap=args.ap,
+        )
     elif args.adaptation == "tent":
 
         base_model = tent.configure_model(base_model)
         params, param_names = tent.collect_params(base_model)
         optimizer = setup_optimizer(params)
-        model = tent.Tent(base_model, optimizer,
-                          steps=args.steps,
-                          episodic=args.episodic,
-                          alpha=args.alpha,
-                          criterion=args.criterion)
+        model = tent.Tent(
+            base_model,
+            optimizer,
+            steps=args.steps,
+            episodic=args.episodic,
+            alpha=args.alpha,
+            criterion=args.criterion,
+        )
     elif args.adaptation == "eata":
-        
-        fisher_dataset = eval("datasets." + f"{args.dataset}".upper())(args.data_dir, transform=transforms.ToTensor())
-        sampled_indices = torch.randperm(len(fisher_dataset))[:args.fisher_size]
+
+        fisher_dataset = eval("datasets." + f"{args.dataset}".upper())(
+            args.data_dir, transform=transforms.ToTensor()
+        )
+        sampled_indices = torch.randperm(len(fisher_dataset))[: args.fisher_size]
         sampler = SubsetRandomSampler(sampled_indices)
-        fisher_loader = DataLoader(fisher_dataset, batch_size=args.batch_size * 2, sampler=sampler)
+        fisher_loader = DataLoader(
+            fisher_dataset, batch_size=args.batch_size * 2, sampler=sampler
+        )
         base_model = eata.configure_model(base_model)
         params, param_names = eata.collect_params(base_model)
         ewc_optimizer = optim.SGD(params, 0.001)
@@ -145,7 +186,9 @@ def evaluate():
             for name, param in base_model.named_parameters():
                 if param.grad is not None:
                     if iter_ > 1:
-                        fisher = param.grad.data.clone().detach() ** 2 + fishers[name][0]
+                        fisher = (
+                            param.grad.data.clone().detach() ** 2 + fishers[name][0]
+                        )
                     else:
                         fisher = param.grad.data.clone().detach() ** 2
                     if iter_ == len(fisher_loader):
@@ -154,26 +197,56 @@ def evaluate():
             ewc_optimizer.zero_grad()
         del ewc_optimizer
         optimizer = setup_optimizer(params)
-        model = eata.EATA(base_model, optimizer, fishers, args.fisher_alpha, e_margin=args.e_margin, d_margin=args.d_margin, alpha=args.alpha, criterion=args.criterion)
+        model = eata.EATA(
+            base_model,
+            optimizer,
+            fishers,
+            args.fisher_alpha,
+            e_margin=args.e_margin,
+            d_margin=args.d_margin,
+            alpha=args.alpha,
+            criterion=args.criterion,
+        )
     elif args.adaptation == "ostta":
         base_model = ostta.configure_model(base_model)
         params, param_names = ostta.collect_params(base_model)
         optimizer = setup_optimizer(params)
-        model = ostta.OSTTA(base_model, optimizer,
-                            steps=args.steps,
-                            episodic=args.episodic,
-                            alpha=args.alpha,
-                            criterion=args.criterion)
-        
+        model = ostta.OSTTA(
+            base_model,
+            optimizer,
+            steps=args.steps,
+            episodic=args.episodic,
+            alpha=args.alpha,
+            criterion=args.criterion,
+        )
+
     elif args.adaptation == "ostta_ema":
         base_model = ostta_ema.configure_model(base_model)
         params, param_names = ostta_ema.collect_params(base_model)
         optimizer = setup_optimizer(params)
-        model = ostta_ema.OSTTA_EMA(base_model, optimizer,
-                            steps=args.steps,
-                            episodic=args.episodic,
-                            alpha=args.alpha,
-                            criterion=args.criterion)
+        model = ostta_ema.OSTTA_EMA(
+            base_model,
+            optimizer,
+            steps=args.steps,
+            episodic=args.episodic,
+            alpha=args.alpha,
+            criterion=args.criterion,
+            gamma=args.gamma,
+        )
+    elif args.adaptation == "kmeans":
+        
+        base_model = tent.configure_model(base_model)
+        params, param_names = tent.collect_params(base_model)
+        optimizer = setup_optimizer(params)
+        model = kmeans.Tent_kmeans(
+            base_model,
+            optimizer,
+            steps=args.steps,
+            episodic=args.episodic,
+            alpha=args.alpha,
+            criterion=args.criterion,
+        )
+    
     # evaluate on each severity and type of corruption in turn
     for i in range(args.rounds):
         t = PrettyTable(["corruption", "acc", "auroc", "fpr95tpr", "oscr"])
@@ -184,20 +257,40 @@ def evaluate():
                 # continual adaptation for all corruption
                 logger.info("not resetting model")
                 # load_cifar10c()
-                x_ind, y_ind = eval(f"load_{args.dataset}c")(args.num_ex,
-                                                             severity, args.data_dir, False,
-                                                             [corruption_type])
-                x_ood, _ = load_svhn_c(args.num_ex, severity, args.data_dir, False, [corruption_type])
+                x_ind, y_ind = eval(f"load_{args.dataset}c")(
+                    args.num_ex, severity, args.data_dir, False, [corruption_type]
+                )
+                x_ood, _ = load_svhn_c(
+                    args.num_ex, severity, args.data_dir, False, [corruption_type]
+                )
                 x_ind, y_ind, x_ood = x_ind.cuda(), y_ind.cuda(), x_ood.cuda()
-                acc, (auc, fpr), oscr_ = get_results(model, x_ind, y_ind, x_ood, args.batch_size)
-                err = 1. - acc
+                acc, (auc, fpr), oscr_ = get_results(
+                    model, x_ind, y_ind, x_ood, args.batch_size
+                )
+                err = 1.0 - acc
                 logger.info(f"error % [{corruption_type}{severity}]: {err:.2%}")
-                t.add_row([f"{severity}/{corruption_type}", f"{acc:.2%}", f"{auc:.2%}", f"{fpr:.2%}", f"{oscr_:.2%}"])
+                t.add_row(
+                    [
+                        f"{severity}/{corruption_type}",
+                        f"{acc:.2%}",
+                        f"{auc:.2%}",
+                        f"{fpr:.2%}",
+                        f"{oscr_:.2%}",
+                    ]
+                )
                 top1.update(acc)
                 auroc.update(auc)
                 fpr95tpr.update(fpr)
                 oscr.update(oscr_)
-        t.add_row(["mean", f"{top1.avg:.2%}", f"{auroc.avg:.2%}", f"{fpr95tpr.avg:.2%}", f"{oscr.avg:.2%}"])
+        t.add_row(
+            [
+                "mean",
+                f"{top1.avg:.2%}",
+                f"{auroc.avg:.2%}",
+                f"{fpr95tpr.avg:.2%}",
+                f"{oscr.avg:.2%}",
+            ]
+        )
         logger.info(f"results of round {i}:\n{t}")
 
 
@@ -210,26 +303,31 @@ def setup_optimizer(params):
         raise NotImplementedError
 
 
-def get_results(model: nn.Module,
-                x_ind: torch.Tensor,
-                y_ind: torch.Tensor,
-                x_ood: torch.Tensor,
-                batch_size: int = 100,
-                device: torch.device = None):
+def get_results(
+    model: nn.Module,
+    x_ind: torch.Tensor,
+    y_ind: torch.Tensor,
+    x_ood: torch.Tensor,
+    batch_size: int = 100,
+    device: torch.device = None,
+):
     if device is None:
         device = x_ind.device
-    acc = 0.
+    acc = 0.0
     y_true, y_score = torch.zeros((0)), torch.zeros((0))
     score_ind, score_ood, pred = torch.zeros((0)), torch.zeros((0)), torch.zeros((0))
     n_batches = math.ceil(x_ind.shape[0] / batch_size)
     with torch.no_grad():
         for counter in range(n_batches):
-            x_ind_curr = x_ind[counter * batch_size:(counter + 1) *
-                               batch_size].to(device)
-            y_ind_curr = y_ind[counter * batch_size:(counter + 1) *
-                               batch_size].to(device)
-            x_ood_curr = x_ood[counter * batch_size:(counter + 1) *
-                               batch_size].to(device)
+            x_ind_curr = x_ind[counter * batch_size : (counter + 1) * batch_size].to(
+                device
+            )
+            y_ind_curr = y_ind[counter * batch_size : (counter + 1) * batch_size].to(
+                device
+            )
+            x_ood_curr = x_ood[counter * batch_size : (counter + 1) * batch_size].to(
+                device
+            )
             x_curr = torch.cat((x_ind_curr, x_ood_curr), dim=0)
 
             output = model(x_curr)
@@ -238,16 +336,37 @@ def get_results(model: nn.Module,
             prob = output.softmax(1)
             max_prob, pred_ = prob.max(1)
 
-            acc += (pred_[:x_ind_curr.shape[0]] == y_ind_curr).float().sum()
+            acc += (pred_[: x_ind_curr.shape[0]] == y_ind_curr).float().sum()
 
-            y_true = torch.cat((y_true, torch.cat((torch.ones(x_ind_curr.shape[0]), torch.zeros(x_ood_curr.shape[0])), dim=0)), dim=0)
+            y_true = torch.cat(
+                (
+                    y_true,
+                    torch.cat(
+                        (
+                            torch.ones(x_ind_curr.shape[0]),
+                            torch.zeros(x_ood_curr.shape[0]),
+                        ),
+                        dim=0,
+                    ),
+                ),
+                dim=0,
+            )
             y_score = torch.cat((y_score, energy.cpu()), dim=0)
-            score_ind = torch.cat((score_ind, energy[:x_ind_curr.shape[0]].cpu()), dim=0)
-            score_ood = torch.cat((score_ood, energy[x_ood_curr.shape[0]:].cpu()), dim=0)
-            pred = torch.cat((pred, pred_[:x_ind_curr.shape[0]].cpu()), dim=0)
+            score_ind = torch.cat(
+                (score_ind, energy[: x_ind_curr.shape[0]].cpu()), dim=0
+            )
+            score_ood = torch.cat(
+                (score_ood, energy[x_ood_curr.shape[0] :].cpu()), dim=0
+            )
+            pred = torch.cat((pred, pred_[: x_ind_curr.shape[0]].cpu()), dim=0)
 
-    return acc.item() / x_ind.shape[0], get_ood_metrics(y_true.numpy(), y_score.numpy()), \
-           get_oscr(score_ind.numpy(), score_ood.numpy(), pred.numpy(), y_ind.cpu().numpy())
+    return (
+        acc.item() / x_ind.shape[0],
+        get_ood_metrics(y_true.numpy(), y_score.numpy()),
+        get_oscr(
+            score_ind.numpy(), score_ood.numpy(), pred.numpy(), y_ind.cpu().numpy()
+        ),
+    )
 
 
 def get_ood_metrics(y_true, y_score):
@@ -258,10 +377,13 @@ def get_ood_metrics(y_true, y_score):
 
 def get_oscr(score_ind, score_ood, pred, y_ind):
     score = np.concatenate((score_ind, score_ood), axis=0)
+
     def get_fpr(t):
         return (score_ood >= t).sum() / len(score_ood)
+
     def get_ccr(t):
         return ((score_ind > t) & (pred == y_ind)).sum() / len(score_ind)
+
     fpr = [0.0]
     ccr = [0.0]
     for s in -np.sort(-score):
