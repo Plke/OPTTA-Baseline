@@ -24,9 +24,10 @@ import norm
 import tent
 import ostta_ema
 import kmeans
+import oslpp
+
 from data import load_svhn, load_svhn_c
 from utils import AverageMeter, get_logger, set_random_seed
-
 
 parser = argparse.ArgumentParser()
 
@@ -39,7 +40,7 @@ parser.add_argument(
 parser.add_argument(
     "--adaptation",
     default="kmeans",
-    choices=["source", "norm", "cotta", "tent", "eata", "ostta", "ostta_ema","kmeans"],
+    choices=["source", "norm", "cotta", "tent", "eata", "ostta", "ostta_ema","kmeans","oslpp"],
 )
 parser.add_argument("--episodic", action="store_true")
 # Corruption options
@@ -235,10 +236,23 @@ def evaluate():
         )
     elif args.adaptation == "kmeans":
         
-        base_model = tent.configure_model(base_model)
-        params, param_names = tent.collect_params(base_model)
+        base_model = kmeans.configure_model(base_model)
+        params, param_names = kmeans.collect_params(base_model)
         optimizer = setup_optimizer(params)
         model = kmeans.Tent_kmeans(
+            base_model,
+            optimizer,
+            steps=args.steps,
+            episodic=args.episodic,
+            alpha=args.alpha,
+            criterion=args.criterion,
+        )
+    elif args.adaptation == "oslpp":
+        
+        base_model = oslpp.configure_model(base_model)
+        params, param_names = oslpp.collect_params(base_model)
+        optimizer = setup_optimizer(params)
+        model = oslpp.Tent_oslpp(
             base_model,
             optimizer,
             steps=args.steps,
