@@ -76,8 +76,9 @@ def forward_and_adapt(x, model, optimizer, alpha):
     # forward
     outputs = model(x)
     cpu_data = outputs.detach().cpu().numpy()
+
     # kmeans 分为两类，方差小的那类作为close set
-    kmeans = KMeans(n_clusters=2, random_state=9,n_init="auto")
+    kmeans = KMeans(n_clusters=2, random_state=9, n_init="auto")
     kmeans.fit(cpu_data)
     labels = kmeans.labels_
     # 获取每个簇的中心点
@@ -98,10 +99,13 @@ def forward_and_adapt(x, model, optimizer, alpha):
     # print(smaller_variance_data.shape)
     # print(other_data.shape)
 
-    loss = (
-        -alpha[0] * softmax_mean_entropy(smaller_variance_data)
-        + alpha[1] * softmax_entropy(other_data)
-    ).sum()
+    # 最小化方差小的部分的熵，最大化方差大的部分的熵
+    loss = softmax_entropy(smaller_variance_data).mean(dim=0) - alpha[
+        1
+    ] * softmax_entropy(other_data).mean(dim=0)
+
+    # 正则化项
+    loss -= alpha[0] * softmax_mean_entropy(outputs)
 
     loss.backward()
     optimizer.step()
