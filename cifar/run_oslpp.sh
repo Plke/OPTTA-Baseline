@@ -1,0 +1,27 @@
+#!/bin/bash
+
+set -Eeuxo pipefail
+
+while getopts ":g:d:" opt; do
+    # shellcheck disable=SC2220
+    case "$opt" in
+        g)
+            gpu="$OPTARG"
+            ;;
+        d)
+            dataset="$OPTARG"
+            ;;
+    esac
+done
+
+# Tent, EATA, OSTTA + UniEnt, UniEnt+
+for adaptation in oslpp; do
+    for alpha1 in 1.0 0.5 0.2 0.1 0; do
+        for alpha2 in 1.0 0.5 0.2 0.1 0; do
+            for orig in False True; do
+                CUDA_VISIBLE_DEVICES=$gpu python main.py --adaptation $adaptation --dataset $dataset --save_dir "./output/oslpp" --alpha $alpha1 $alpha2 --orig $orig
+            done
+        done
+    done
+done
+

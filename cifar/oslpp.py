@@ -16,7 +16,14 @@ class Tent_oslpp(nn.Module):
     """
 
     def __init__(
-        self, model, optimizer, steps=1, episodic=False, alpha=[0.5], criterion="ent"
+        self,
+        model,
+        optimizer,
+        steps=1,
+        episodic=False,
+        alpha=[0.5],
+        criterion="ent",
+        orig=False,
     ):
         super().__init__()
         self.model = model
@@ -26,7 +33,7 @@ class Tent_oslpp(nn.Module):
         self.episodic = episodic
         self.alpha = alpha
         self.criterion = criterion
-
+        self.orig = orig
         self.model0 = deepcopy(self.model)
         for param in self.model0.parameters():
             param.detach()
@@ -42,7 +49,9 @@ class Tent_oslpp(nn.Module):
             self.reset()
 
         for _ in range(self.steps):
-            outputs = forward_and_adapt(x, self.model, self.optimizer, self.alpha)
+            outputs = forward_and_adapt(
+                x, self.model0, self.model, self.optimizer, self.alpha, self.orig
+            )
 
         return outputs
 
@@ -68,18 +77,64 @@ def softmax_mean_entropy(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, model, optimizer, alpha):
+def forward_and_adapt(x, model0, model, optimizer, alpha, orig):
     """Forward and adapt model on batch of data.
 
     Measure entropy of the model prediction, take gradients, and update params.
     """
     # forward
+    loss = 0
+    outputs = model0(x)
+
+    # 原域的计算类的均值,使用原模型实现
+    classes = outputs.shape[1]
+    output_len = outputs.shape[0]
+    mean_dis = np.zeros((classes, classes))
+    cpu_data = outputs.detach().cpu().numpy()
+    for i in range(classes):
+        class_outputs = cpu_data[np.argmax(cpu_data, axis=1) == i]
+        if len(class_outputs) > 0:
+            mean_dis[i] = class_outputs.mean(0)
+    mean_dis = torch.tensor(mean_dis).to(x.device)
+    # 使用适应后的模型进行适应
     outputs = model(x)
-    len = outputs.shape[0]
-    for i in range(len):
-        for j in range(i + 1, len):
-            w = torch.argmax(outputs[i]) == torch.argmax(outputs[j])
-            loss += torch.norm(outputs[i] - outputs[j], 2) * w
+
+    # 获得每个样本的预测标签
+    predicted_labels = torch.empty(output_len, 1).to(x.device)
+    predicted_probs = torch.empty(output_len, classes).to(x.device)
+
+    for i, output in enumerate(outputs):
+        dis = torch.norm(mean_dis - output, dim=1, p=2)
+        predicted_label = torch.argmin(dis)
+        predicted_prob = torch.softmax(dis, dim=0)
+        # print("predicted_label",predicted_label)
+        # print("predicted_prob.shape",predicted_prob.shape)
+        predicted_labels[i] = predicted_label
+        predicted_probs[i] = predicted_prob
+
+    # 转换为张量
+
+    # predicted_labels = torch.tensor(predicted_labels)
+    # predicted_probs = torch.tensor(predicted_probs)
+    prob, _ = torch.max(predicted_probs, dim=1)
+    # print("prob", prob)
+    sorted_index = torch.argsort(prob)
+
+    #  初始拒绝样本
+
+    # for _ in range(5):
+    # 选择接受样本，每个类别概率前几的样本作为接受样本，万一这一批次没有这类样本
+    # 选择概率最高的几个样本作为接受样本
+    selected_sample = outputs[sorted_index[output_len - int((output_len) / 5) :]]
+
+    # 拒绝样本选择，概率最低的几个
+    reject_sample = outputs[sorted_index[: int((output_len) / 5)]]
+    # distances = torch.norm(reject_sample[0] - outputs, dim=1, p=2)
+    # reject_sample.append(outputs[torch.argmin(distances)])
+
+    loss = softmax_entropy(selected_sample).mean(0) - alpha[1] * softmax_entropy(
+        reject_sample
+    ).mean(0)
 
     # 正则化项
     loss -= alpha[0] * softmax_mean_entropy(outputs)
@@ -87,6 +142,8 @@ def forward_and_adapt(x, model, optimizer, alpha):
     loss.backward()
     optimizer.step()
     optimizer.zero_grad()
+    if orig:
+        return predicted_probs
     return outputs
 
 

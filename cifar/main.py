@@ -83,6 +83,9 @@ parser.add_argument("--d_margin", default=0.05, type=float)
 parser.add_argument("--gamma", default=0.99, type=float)
 
 
+# OSLPP
+parser.add_argument("--orig",default=False)
+
 args = parser.parse_args()
 
 args.type = [
@@ -103,13 +106,14 @@ args.type = [
     "jpeg_compression",
 ]
 args.severity = [5]
-args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}.txt".format(
+args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_orig_{}.txt".format(
     args.adaptation,
     args.dataset,
     args.lr,
     "_".join(str(alpha) for alpha in args.alpha),
     args.criterion,
     args.gamma,
+    args.orig
 )
 args.ap = 0.92 if args.dataset == "cifar10" else 0.72
 args.e_margin = (
@@ -259,6 +263,7 @@ def evaluate():
             episodic=args.episodic,
             alpha=args.alpha,
             criterion=args.criterion,
+            orig=args.orig
         )
     
     # evaluate on each severity and type of corruption in turn
