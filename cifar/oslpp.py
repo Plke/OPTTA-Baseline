@@ -96,6 +96,7 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, orig):
         if len(class_outputs) > 0:
             mean_dis[i] = class_outputs.mean(0)
     mean_dis = torch.tensor(mean_dis).to(x.device)
+
     # 使用适应后的模型进行适应
     outputs = model(x)
 
@@ -106,18 +107,14 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, orig):
     for i, output in enumerate(outputs):
         dis = torch.norm(mean_dis - output, dim=1, p=2)
         predicted_label = torch.argmin(dis)
-        predicted_prob = torch.softmax(dis, dim=0)
-        # print("predicted_label",predicted_label)
-        # print("predicted_prob.shape",predicted_prob.shape)
+        predicted_prob = torch.softmax(-dis, dim=0)
+
         predicted_labels[i] = predicted_label
         predicted_probs[i] = predicted_prob
 
     # 转换为张量
 
-    # predicted_labels = torch.tensor(predicted_labels)
-    # predicted_probs = torch.tensor(predicted_probs)
     prob, _ = torch.max(predicted_probs, dim=1)
-    # print("prob", prob)
     sorted_index = torch.argsort(prob)
 
     #  初始拒绝样本
