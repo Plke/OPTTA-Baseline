@@ -40,7 +40,17 @@ parser.add_argument(
 parser.add_argument(
     "--adaptation",
     default="kmeans",
-    choices=["source", "norm", "cotta", "tent", "eata", "ostta", "ostta_ema","kmeans","oslpp"],
+    choices=[
+        "source",
+        "norm",
+        "cotta",
+        "tent",
+        "eata",
+        "ostta",
+        "ostta_ema",
+        "kmeans",
+        "oslpp",
+    ],
 )
 parser.add_argument("--episodic", action="store_true")
 # Corruption options
@@ -66,7 +76,7 @@ parser.add_argument("--mt", default=0.999, type=float)
 parser.add_argument("--rst", default=0.01, type=float)
 parser.add_argument("--ap", default=0.92, type=float)
 # Tent options
-parser.add_argument("--alpha", nargs="+", default=[0.5,0.5], type=float)
+parser.add_argument("--alpha", nargs="+", default=[0.5, 0.5], type=float)
 
 
 parser.add_argument(
@@ -84,7 +94,9 @@ parser.add_argument("--gamma", default=0.99, type=float)
 
 
 # OSLPP
-parser.add_argument("--orig",default=False)
+parser.add_argument("--orig", default=False)
+parser.add_argument("--nr", default=3, type=int)
+
 
 args = parser.parse_args()
 
@@ -106,14 +118,15 @@ args.type = [
     "jpeg_compression",
 ]
 args.severity = [5]
-args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_orig_{}.txt".format(
+args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_orig_{}_nr_{}.txt".format(
     args.adaptation,
     args.dataset,
     args.lr,
     "_".join(str(alpha) for alpha in args.alpha),
     args.criterion,
     args.gamma,
-    args.orig
+    args.orig,
+    args.nr,
 )
 args.ap = 0.92 if args.dataset == "cifar10" else 0.72
 args.e_margin = (
@@ -239,7 +252,7 @@ def evaluate():
             gamma=args.gamma,
         )
     elif args.adaptation == "kmeans":
-        
+
         base_model = kmeans.configure_model(base_model)
         params, param_names = kmeans.collect_params(base_model)
         optimizer = setup_optimizer(params)
@@ -252,20 +265,21 @@ def evaluate():
             criterion=args.criterion,
         )
     elif args.adaptation == "oslpp":
-        
+
         base_model = oslpp.configure_model(base_model)
         params, param_names = oslpp.collect_params(base_model)
         optimizer = setup_optimizer(params)
         model = oslpp.Tent_oslpp(
             base_model,
-            optimizer,
+            optimizer=optimizer,
             steps=args.steps,
             episodic=args.episodic,
             alpha=args.alpha,
             criterion=args.criterion,
-            orig=args.orig
+            orig=args.orig,
+            nr=args.nr,
         )
-    
+
     # evaluate on each severity and type of corruption in turn
     for i in range(args.rounds):
         t = PrettyTable(["corruption", "acc", "auroc", "fpr95tpr", "oscr"])

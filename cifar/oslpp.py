@@ -24,6 +24,7 @@ class Tent_oslpp(nn.Module):
         alpha=[0.5],
         criterion="ent",
         orig=False,
+        nr=3,
     ):
         super().__init__()
         self.model = model
@@ -34,6 +35,7 @@ class Tent_oslpp(nn.Module):
         self.alpha = alpha
         self.criterion = criterion
         self.orig = orig
+        self.nr = nr
         self.model0 = deepcopy(self.model)
         for param in self.model0.parameters():
             param.detach()
@@ -50,7 +52,13 @@ class Tent_oslpp(nn.Module):
 
         for _ in range(self.steps):
             outputs = forward_and_adapt(
-                x, self.model0, self.model, self.optimizer, self.alpha, self.orig
+                x,
+                self.model0,
+                self.model,
+                self.optimizer,
+                self.alpha,
+                self.orig,
+                self.nr,
             )
 
         return outputs
@@ -76,8 +84,27 @@ def softmax_mean_entropy(x: torch.Tensor) -> torch.Tensor:
     return -(x * torch.log(x)).sum()
 
 
+def init_select_reject(pseudo_probs,nr=20):
+    '''
+    返回初始选择拒接样本的标记
+    1为接受
+    -1为拒绝
+    '''
+    tag=np.zero(len(pseudo_probs))
+    prob, _ = torch.max(pseudo_probs, dim=1)
+    sorted_index = torch.argsort(prob)
+    #拒绝
+    tag[sorted_index[:nr]]=-1
+    #接受
+    tag[sorted_index[nr:]]=1
+    return tag
+
+def get_l2_norm(features:np.ndarray): return np.sqrt(np.square(features).sum(axis=1)).reshape((-1,1)) 
+def get_dist(f, features):
+    return get_l2_norm(f - features)
+
 @torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, model0, model, optimizer, alpha, orig):
+def forward_and_adapt(x, model0, model, optimizer, alpha, orig, nr):
     """Forward and adapt model on batch of data.
 
     Measure entropy of the model prediction, take gradients, and update params.
@@ -114,18 +141,31 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, orig):
 
     # 转换为张量
 
-    prob, _ = torch.max(predicted_probs, dim=1)
-    sorted_index = torch.argsort(prob)
+
 
     #  初始拒绝样本
 
+
+    #初始化接受样本集和拒绝样本集，然后遍历未分类的样本集，对于每个样本计算接受集和拒绝集的距离，那个距离近分匹配到那个集合
+    tag = init_select_reject(predicted_probs,nr)
+    for i in range(output_len):
+        if tag[i]==0:
+            dist_to_selected=get_dist(predicted_probs[i],predicted_probs[tag==1]).min()
+            dist_to_rejected=get_dist(predicted_probs[i],predicted_probs[tag==-1]).min()
+            if dist_to_selected < dist_to_rejected:
+                tag[i]=1
+            else:
+                tag[i]=-1
+    
+
     # for _ in range(5):
     # 选择接受样本，每个类别概率前几的样本作为接受样本，万一这一批次没有这类样本
-    # 选择概率最高的几个样本作为接受样本
-    selected_sample = outputs[sorted_index[output_len - int((output_len) / 5) :]]
+    # 选择概率最高的几个样本作为接受样本,选择五分之一/修改为三分之一
+    selected_sample = outputs[tag==1]
 
     # 拒绝样本选择，概率最低的几个
-    reject_sample = outputs[sorted_index[: int((output_len) / 5)]]
+    # reject_sample = outputs[sorted_index[: int((output_len) / nr)]]
+    reject_sample = outputs[tag==-1]
     # distances = torch.norm(reject_sample[0] - outputs, dim=1, p=2)
     # reject_sample.append(outputs[torch.argmin(distances)])
 
