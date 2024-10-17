@@ -94,7 +94,6 @@ parser.add_argument("--gamma", default=0.99, type=float)
 
 
 # OSLPP
-parser.add_argument("--orig", default=False)
 parser.add_argument("--nr", default=3, type=int)
 
 
@@ -118,14 +117,13 @@ args.type = [
     "jpeg_compression",
 ]
 args.severity = [5]
-args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_orig_{}_nr_{}.txt".format(
+args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_nr_{}.txt".format(
     args.adaptation,
     args.dataset,
     args.lr,
     "_".join(str(alpha) for alpha in args.alpha),
     args.criterion,
     args.gamma,
-    args.orig,
     args.nr,
 )
 args.ap = 0.92 if args.dataset == "cifar10" else 0.72
@@ -263,6 +261,7 @@ def evaluate():
             episodic=args.episodic,
             alpha=args.alpha,
             criterion=args.criterion,
+            nr=args.nr
         )
     elif args.adaptation == "oslpp":
 
@@ -276,7 +275,6 @@ def evaluate():
             episodic=args.episodic,
             alpha=args.alpha,
             criterion=args.criterion,
-            orig=args.orig,
             nr=args.nr,
         )
 

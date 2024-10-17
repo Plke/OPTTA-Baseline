@@ -7,6 +7,7 @@ import torch.jit
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 import numpy as np
+from sklearn.decomposition import PCA
 
 
 class Tent_kmeans(nn.Module):
@@ -16,7 +17,14 @@ class Tent_kmeans(nn.Module):
     """
 
     def __init__(
-        self, model, optimizer, steps=1, episodic=False, alpha=[0.5], criterion="ent"
+        self,
+        model,
+        optimizer,
+        steps=1,
+        episodic=False,
+        alpha=[0.5],
+        criterion="ent",
+        nr=5,
     ):
         super().__init__()
         self.model = model
@@ -28,6 +36,8 @@ class Tent_kmeans(nn.Module):
         self.criterion = criterion
 
         self.model0 = deepcopy(self.model)
+        self.model0.fc = nn.Identity()
+        self.nr = nr
         for param in self.model0.parameters():
             param.detach()
 
@@ -42,7 +52,9 @@ class Tent_kmeans(nn.Module):
             self.reset()
 
         for _ in range(self.steps):
-            outputs = forward_and_adapt(x, self.model, self.optimizer, self.alpha)
+            outputs = forward_and_adapt(
+                x, self.model0, self.model, self.optimizer, self.alpha, self.nr
+            )
 
         return outputs
 
@@ -68,41 +80,46 @@ def softmax_mean_entropy(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, model, optimizer, alpha):
+def forward_and_adapt(x, model0, model, optimizer, alpha, nr):
     """Forward and adapt model on batch of data.
 
     Measure entropy of the model prediction, take gradients, and update params.
     """
     # forward
-    outputs = model(x)
-    cpu_data = outputs.detach().cpu().numpy()
+    features = model0(x)
+    feature_map = features.detach().cpu().numpy()
+
+    result = PCA(n_components=10).fit_transform(feature_map)
+    # print(feature_map.shape)
 
     # kmeans 分为两类，方差小的那类作为close set
-    kmeans = KMeans(n_clusters=2, random_state=9, n_init="auto")
-    kmeans.fit(cpu_data)
+    kmeans = KMeans(n_clusters=10, random_state=9, n_init="auto")
+    kmeans.fit(result)
     labels = kmeans.labels_
-    # 获取每个簇的中心点
-    centroids = kmeans.cluster_centers_
+    centers = kmeans.cluster_centers_
 
-    # 计算每个簇的方差
-    variances = {}
-    for i in range(2):
-        cluster_data = cpu_data[labels == i]
-        variance = np.var(cluster_data - centroids[i], axis=1).mean()
-        variances[i] = variance
+    closest_sample_indices = []
+    for i in range(10):
+        # 找到属于第i个类别的样本的索引
+        cluster_i_indices = np.where(labels == i)[0]
 
-    smaller_variance_cluster = min(variances, key=variances.get)
-    smaller_variance_data = outputs[labels == smaller_variance_cluster]
-    other_data = outputs[labels != smaller_variance_cluster]
+        # 计算这些样本到中心点的距离
+        distances = np.linalg.norm(result[cluster_i_indices] - centers[i], axis=1)
 
-    # print("data_shape")
-    # print(smaller_variance_data.shape)
-    # print(other_data.shape)
+        # 根据距离排序并选择最近的10个样本的索引
+        closest_indices = np.argsort(distances)[:nr]
+        closest_sample_indices.append(cluster_i_indices[closest_indices])
+
+    outputs = model(x)
+    close_set_index = np.concatenate(closest_sample_indices)
+    close_set_data = outputs[close_set_index]
+
+    other_data = outputs[~close_set_index]
 
     # 最小化方差小的部分的熵，最大化方差大的部分的熵
-    loss = softmax_entropy(smaller_variance_data).mean(dim=0) - alpha[
-        1
-    ] * softmax_entropy(other_data).mean(dim=0)
+    loss = softmax_entropy(close_set_data).mean(dim=0) - alpha[1] * softmax_entropy(
+        other_data
+    ).mean(dim=0)
 
     # 正则化项
     loss -= alpha[0] * softmax_mean_entropy(outputs)
