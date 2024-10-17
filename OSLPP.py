@@ -473,6 +473,7 @@ def main(params: Params):
         # 生成伪标签和概率
         pseudo_labels, pseudo_probs = get_closed_set_pseudo_labels(proj_S, lbls_S, proj_T)
         selected = select_closed_set_pseudo_labels(pseudo_labels, pseudo_probs, t, params.T)
+        # 没拒绝的就接受
         selected = selected * (1-rejected)
 
         # 处理初始拒绝的伪标签

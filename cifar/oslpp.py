@@ -37,6 +37,7 @@ class Tent_oslpp(nn.Module):
         self.orig = orig
         self.nr = nr
         self.model0 = deepcopy(self.model)
+        self.model0.fc = nn.Identity()
         for param in self.model0.parameters():
             param.detach()
 
@@ -57,7 +58,6 @@ class Tent_oslpp(nn.Module):
                 self.model,
                 self.optimizer,
                 self.alpha,
-                self.orig,
                 self.nr,
             )
 
@@ -84,34 +84,42 @@ def softmax_mean_entropy(x: torch.Tensor) -> torch.Tensor:
     return -(x * torch.log(x)).sum()
 
 
-def init_select_reject(pseudo_probs,nr=20):
-    '''
+def init_select_reject(pseudo_probs, nr=20):
+    """
     返回初始选择拒接样本的标记
     1为接受
     -1为拒绝
-    '''
-    tag=np.zero(len(pseudo_probs))
+    """
+    tag = np.zeros(len(pseudo_probs))
     prob, _ = torch.max(pseudo_probs, dim=1)
-    sorted_index = torch.argsort(prob)
-    #拒绝
-    tag[sorted_index[:nr]]=-1
-    #接受
-    tag[sorted_index[nr:]]=1
+    sorted_index = torch.argsort(prob).cpu().detach()
+    # 拒绝，概率最低的nr个
+    tag[sorted_index[:nr]] = -1
+    # 接受，概率最高的nr个
+    tag[sorted_index[nr:]] = 1
     return tag
 
-def get_l2_norm(features:np.ndarray): return np.sqrt(np.square(features).sum(axis=1)).reshape((-1,1)) 
+
+def get_l2_norm(features: np.ndarray):
+    return np.sqrt(np.square(features).sum(axis=1)).reshape((-1, 1))
+
+
 def get_dist(f, features):
     return get_l2_norm(f - features)
 
+
 @torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, model0, model, optimizer, alpha, orig, nr):
+def forward_and_adapt(x, model0, model, optimizer, alpha, nr):
     """Forward and adapt model on batch of data.
 
     Measure entropy of the model prediction, take gradients, and update params.
     """
     # forward
     loss = 0
-    outputs = model0(x)
+    
+    features = model0(x)
+    features = features.detach().cpu().numpy()
+    
 
     # 原域的计算类的均值,使用原模型实现
     classes = outputs.shape[1]
@@ -139,33 +147,32 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, orig, nr):
         predicted_labels[i] = predicted_label
         predicted_probs[i] = predicted_prob
 
-    # 转换为张量
+    # 初始化接受样本集和拒绝样本集，然后遍历未分类的样本集，对于每个样本计算接受集和拒绝集的距离，那个距离近分匹配到那个集合
+    tag = init_select_reject(predicted_probs, nr)
 
-
-
-    #  初始拒绝样本
-
-
-    #初始化接受样本集和拒绝样本集，然后遍历未分类的样本集，对于每个样本计算接受集和拒绝集的距离，那个距离近分匹配到那个集合
-    tag = init_select_reject(predicted_probs,nr)
+    # 更新样本
     for i in range(output_len):
-        if tag[i]==0:
-            dist_to_selected=get_dist(predicted_probs[i],predicted_probs[tag==1]).min()
-            dist_to_rejected=get_dist(predicted_probs[i],predicted_probs[tag==-1]).min()
+        if tag[i] == 0:
+            dist_to_selected = get_dist(
+                predicted_probs[i], predicted_probs[tag == 1]
+            ).min()
+            dist_to_rejected = get_dist(
+                predicted_probs[i], predicted_probs[tag == -1]
+            ).min()
+
             if dist_to_selected < dist_to_rejected:
-                tag[i]=1
+                tag[i] = 1
             else:
-                tag[i]=-1
-    
+                tag[i] = -1
 
     # for _ in range(5):
     # 选择接受样本，每个类别概率前几的样本作为接受样本，万一这一批次没有这类样本
     # 选择概率最高的几个样本作为接受样本,选择五分之一/修改为三分之一
-    selected_sample = outputs[tag==1]
+    selected_sample = outputs[tag == 1]
 
     # 拒绝样本选择，概率最低的几个
     # reject_sample = outputs[sorted_index[: int((output_len) / nr)]]
-    reject_sample = outputs[tag==-1]
+    reject_sample = outputs[tag == -1]
     # distances = torch.norm(reject_sample[0] - outputs, dim=1, p=2)
     # reject_sample.append(outputs[torch.argmin(distances)])
 
@@ -179,8 +186,7 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, orig, nr):
     loss.backward()
     optimizer.step()
     optimizer.zero_grad()
-    if orig:
-        return predicted_probs
+
     return outputs
 
 
