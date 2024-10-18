@@ -15,13 +15,13 @@ while getopts ":g:d:" opt; do
 done
 
 for adaptation in source norm cotta; do
-    CUDA_VISIBLE_DEVICES=$gpu python main.py --adaptation $adaptation --dataset $dataset --save_dir "./output"
+    CUDA_VISIBLE_DEVICES=$gpu python main.py --adaptation $adaptation --dataset $dataset --save_dir "./output/${dataset}"
 done
 
 # Tent, EATA, OSTTA
 for adaptation in tent eata ostta; do
     for alpha in 1.0 0.5 0.2 0.1; do
-        CUDA_VISIBLE_DEVICES=$gpu python main.py --adaptation $adaptation --dataset $dataset --save_dir "./output" --alpha $alpha
+        CUDA_VISIBLE_DEVICES=$gpu python main.py --adaptation $adaptation --dataset $dataset --save_dir "./output/${dataset}" --alpha $alpha
     done
 done
 
