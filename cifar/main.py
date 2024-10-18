@@ -93,8 +93,9 @@ parser.add_argument("--d_margin", default=0.05, type=float)
 parser.add_argument("--gamma", default=0.99, type=float)
 
 
-# OSLPP
+# kmeans
 parser.add_argument("--nr", default=3, type=int)
+parser.add_argument("--n_cluster", default=10, type=int)
 
 
 args = parser.parse_args()
@@ -117,13 +118,14 @@ args.type = [
     "jpeg_compression",
 ]
 args.severity = [5]
-args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_nr_{}.txt".format(
+args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_ncluster_{}_nr_{}.txt".format(
     args.adaptation,
     args.dataset,
     args.lr,
     "_".join(str(alpha) for alpha in args.alpha),
     args.criterion,
     args.gamma,
+    args.n_cluster,
     args.nr,
 )
 args.ap = 0.92 if args.dataset == "cifar10" else 0.72
@@ -261,6 +263,7 @@ def evaluate():
             episodic=args.episodic,
             alpha=args.alpha,
             criterion=args.criterion,
+            n_cluster=args.n_cluster,
             nr=args.nr
         )
     elif args.adaptation == "oslpp":

@@ -24,6 +24,7 @@ class Tent_kmeans(nn.Module):
         episodic=False,
         alpha=[0.5],
         criterion="ent",
+        n_cluster=10,
         nr=5,
     ):
         super().__init__()
@@ -37,6 +38,7 @@ class Tent_kmeans(nn.Module):
 
         self.model0 = deepcopy(self.model)
         self.model0.fc = nn.Identity()
+        self.n_cluster = n_cluster
         self.nr = nr
         for param in self.model0.parameters():
             param.detach()
@@ -53,7 +55,13 @@ class Tent_kmeans(nn.Module):
 
         for _ in range(self.steps):
             outputs = forward_and_adapt(
-                x, self.model0, self.model, self.optimizer, self.alpha, self.nr
+                x,
+                self.model0,
+                self.model,
+                self.optimizer,
+                self.alpha,
+                self.n_cluster,
+                self.nr,
             )
 
         return outputs
@@ -80,7 +88,7 @@ def softmax_mean_entropy(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, model0, model, optimizer, alpha, nr):
+def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr):
     """Forward and adapt model on batch of data.
 
     Measure entropy of the model prediction, take gradients, and update params.
@@ -92,8 +100,9 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, nr):
     result = PCA(n_components=10).fit_transform(feature_map)
     # print(feature_map.shape)
 
-    # kmeans 分为两类，方差小的那类作为close set
-    kmeans = KMeans(n_clusters=10, random_state=9, n_init="auto")
+    # 使用kmeans分为类别数个类，然后选择每个类别中距离中心点最近的nr个样本作为闭集样本进行训练
+    # 问题: 1000个类，200个测试样本，全选上了
+    kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto")
     kmeans.fit(result)
     labels = kmeans.labels_
     centers = kmeans.cluster_centers_
@@ -116,7 +125,6 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, nr):
 
     other_data = outputs[~close_set_index]
 
-    # 最小化方差小的部分的熵，最大化方差大的部分的熵
     loss = softmax_entropy(close_set_data).mean(dim=0) - alpha[1] * softmax_entropy(
         other_data
     ).mean(dim=0)
