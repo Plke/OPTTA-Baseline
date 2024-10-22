@@ -4,8 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.jit
-from sklearn.mixture import GaussianMixture
+# from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
+
+from fast_pytorch_kmeans import KMeans
 import numpy as np
 from sklearn.decomposition import PCA
 
@@ -95,15 +97,17 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr):
     """
     # forward
     features = model0(x)
-    feature_map = features.detach().cpu().numpy()
 
+    feature_map = features.detach().cpu().numpy()
     result = PCA(n_components=10).fit_transform(feature_map)
     # print(feature_map.shape)
+    kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto").fit(result)
 
     # 使用kmeans分为类别数个类，然后选择每个类别中距离中心点最近的nr个样本作为闭集样本进行训练
     # 问题: 1000个类，200个测试样本，全选上了
-    kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto")
-    kmeans.fit(result)
+
+    # kmeans = KMeans(n_clusters=n_cluster, mode='euclidean', verbose=1).fit_predict(features)
+
     labels = kmeans.labels_
     centers = kmeans.cluster_centers_
 
@@ -111,12 +115,15 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr):
     for i in range(10):
         # 找到属于第i个类别的样本的索引
         cluster_i_indices = np.where(labels == i)[0]
-
+        # cluster_i_indices = torch.where(labels ==i)[0]
+        # distances=torch.norm(features[cluster_i_indices], centers[i], dim=1)
         # 计算这些样本到中心点的距离
         distances = np.linalg.norm(result[cluster_i_indices] - centers[i], axis=1)
 
         # 根据距离排序并选择最近的10个样本的索引
         closest_indices = np.argsort(distances)[:nr]
+        # close_indices =torch.argsort(distances)[:nr]
+        # closest_sample_indices
         closest_sample_indices.append(cluster_i_indices[closest_indices])
 
     outputs = model(x)
