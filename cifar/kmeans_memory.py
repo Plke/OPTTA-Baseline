@@ -8,7 +8,6 @@ from sklearn.mixture import GaussianMixture
 
 from sklearn.cluster import KMeans
 
-# fast
 # from fast_pytorch_kmeans import KMeans
 import numpy as np
 from sklearn.decomposition import PCA
@@ -43,8 +42,9 @@ class Tent_kmeans(nn.Module):
         self.model0 = deepcopy(self.model)
         self.model0.fc = nn.Identity()
         self.n_cluster = n_cluster
-        # self.kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto")
         self.nr = nr
+
+        self.kmeans = KMeans(n_clusters=n_cluster, mode="euclidean", verbose=1)
         for param in self.model0.parameters():
             param.detach()
 
@@ -67,7 +67,7 @@ class Tent_kmeans(nn.Module):
                 self.alpha,
                 self.n_cluster,
                 self.nr,
-                
+                self.kmeans,
             )
 
         return outputs
@@ -94,75 +94,40 @@ def softmax_mean_entropy(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr):
+def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr, kmeans):
     """Forward and adapt model on batch of data.
 
     Measure entropy of the model prediction, take gradients, and update params.
     """
-    # # forward
-    # features = model0(x)
-
-    # # feature_map = features.detach().cpu().numpy()
-    # # result = PCA(n_components=10).fit_transform(feature_map)
-    # # print(feature_map.shape)
-    # # kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto").fit(result)
-
-    # # 使用kmeans分为类别数个类，然后选择每个类别中距离中心点最近的nr个样本作为闭集样本进行训练
-    # # 问题: 1000个类，200个测试样本，全选上了
-
-    # kmeans = KMeans(n_clusters=n_cluster, mode="euclidean", verbose=1)
-
-    # labels = kmeans.fit_predict(features)
-    # centers = kmeans.centroids
-
-    # closest_sample_indices = []
-    # for i in range(n_cluster):
-    #     # 找到属于第i个类别的样本的索引
-    #     # cluster_i_indices = np.where(labels == i)[0]
-    #     cluster_i_indices = torch.where(labels == i)[0]
-    #     distances = torch.norm(features[cluster_i_indices]-centers[i], dim=1)
-    #     # 计算这些样本到中心点的距离
-    #     # distances = np.linalg.norm(result[cluster_i_indices] - centers[i], axis=1)
-
-    #     # 根据距离排序并选择最近的10个样本的索引
-    #     closest_indices = torch.argsort(distances)[:nr]
-    #     closest_sample_indices.append(cluster_i_indices[closest_indices])
-
-    # # print(closest_sample_indices)
-    # outputs = model(x)
-    # close_set_index = torch.cat(closest_sample_indices)
-
     # forward
     features = model0(x)
 
     feature_map = features.detach().cpu().numpy()
-    # result = PCA(n_components=10).fit_transform(feature_map)
-    # print(feature_map.shape)
-    kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto")
+    result = PCA(n_components=10).fit_transform(feature_map)
+    print(feature_map.shape)
+    kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto").fit(result)
 
     # 使用kmeans分为类别数个类，然后选择每个类别中距离中心点最近的nr个样本作为闭集样本进行训练
     # 问题: 1000个类，200个测试样本，全选上了
 
-    labels = kmeans.fit_predict(feature_map)
+    labels = kmeans.predict(features)
     centers = kmeans.cluster_centers_
 
     closest_sample_indices = []
     for i in range(n_cluster):
         # 找到属于第i个类别的样本的索引
         cluster_i_indices = np.where(labels == i)[0]
-
-        if len(cluster_i_indices) == 0:
-            continue
-
+        
         # 计算这些样本到中心点的距离
-        distances = np.linalg.norm(feature_map[cluster_i_indices] - centers[i], axis=1)
+        distances = np.linalg.norm(result[cluster_i_indices] - centers[i], axis=1)
 
         # 根据距离排序并选择最近的 nr 个样本的索引
         closest_indices = np.argsort(distances)[:nr]
         closest_sample_indices.append(cluster_i_indices[closest_indices])
 
-    close_set_index = np.concatenate(closest_sample_indices)
+    # print(closest_sample_indices)
     outputs = model(x)
+    close_set_index = np.concatenate(closest_sample_indices)
     close_set_data = outputs[close_set_index]
 
     other_data = outputs[~close_set_index]
