@@ -14,6 +14,44 @@ import numpy as np
 from sklearn.decomposition import PCA
 
 
+import numpy as np
+
+
+class MyQueue:
+    def __init__(self, max_len, dim):
+        self.max_len = max_len
+        self.dim = dim
+        self.len = 0
+        self.data = np.zeros([max_len, dim])
+        self.index = 0
+
+    def add(self, x):
+        if x.shape[0] > self.max_len:
+            raise ValueError(
+                f"输入数据长度 {x.shape[0]} 超过队列最大长度 {self.max_len}"
+            )
+
+        n = x.shape[0]
+        if self.len + n <= self.max_len:
+            # 队列未满，直接添加数据
+            self.data[self.index : self.index + n] = x
+            self.len += n
+            self.index = (self.index + n) % self.max_len
+        else:
+            # 队列已满，处理循环队列
+            remaining_space = self.max_len - self.len
+            self.data[self.index : self.index + remaining_space] = x[:remaining_space]
+            self.data[: n - remaining_space] = x[remaining_space:]
+            self.index = (self.index + n) % self.max_len
+            self.len = self.max_len
+
+    def get(self):
+        if self.len < self.max_len:
+            return self.data[: self.len]
+        else:
+            return self.data
+
+
 class Tent_kmeans(nn.Module):
     """Tent adapts a model by entropy minimization during testing.
 
@@ -44,6 +82,8 @@ class Tent_kmeans(nn.Module):
         self.model0.fc = nn.Identity()
         self.n_cluster = n_cluster
         # self.kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto")
+        # 长度为 n_cluster * 20
+        self.queue = MyQueue(n_cluster * 20, 128)
         self.nr = nr
         for param in self.model0.parameters():
             param.detach()
@@ -67,7 +107,8 @@ class Tent_kmeans(nn.Module):
                 self.alpha,
                 self.n_cluster,
                 self.nr,
-                
+                self.queue,
+                # self.kmeans,
             )
 
         return outputs
@@ -94,7 +135,7 @@ def softmax_mean_entropy(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr):
+def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr, queue):
     """Forward and adapt model on batch of data.
 
     Measure entropy of the model prediction, take gradients, and update params.
@@ -136,6 +177,9 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr):
     features = model0(x)
 
     feature_map = features.detach().cpu().numpy()
+
+    queue.add(feature_map)
+
     # result = PCA(n_components=10).fit_transform(feature_map)
     # print(feature_map.shape)
     kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto")
@@ -143,7 +187,7 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr):
     # 使用kmeans分为类别数个类，然后选择每个类别中距离中心点最近的nr个样本作为闭集样本进行训练
     # 问题: 1000个类，200个测试样本，全选上了
 
-    labels = kmeans.fit_predict(feature_map)
+    labels = kmeans.fit_predict(queue.get())
     centers = kmeans.cluster_centers_
 
     closest_sample_indices = []
@@ -158,7 +202,10 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr):
         distances = np.linalg.norm(feature_map[cluster_i_indices] - centers[i], axis=1)
 
         # 根据距离排序并选择最近的 nr 个样本的索引
-        closest_indices = np.argsort(distances)[:nr]
+        if len(cluster_i_indices) < nr:
+            closest_indices =   np.argsort(distances)[:]
+        else:
+            closest_indices = np.argsort(distances)[:nr]
         closest_sample_indices.append(cluster_i_indices[closest_indices])
 
     close_set_index = np.concatenate(closest_sample_indices)
