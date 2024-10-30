@@ -89,7 +89,7 @@ def forward_and_adapt(x, optimizer, alpha, criterion, model0, model):
     _, indices = nbrs.kneighbors(features)
     close_ind = []
     open_ind = []
-    
+
     for i in range(outputs.size(0)):
         # 得到距离样本i，最近的样本
         if values[i] >= values0[i] and labels[i] == labels[indices[i][1]]:
@@ -102,6 +102,7 @@ def forward_and_adapt(x, optimizer, alpha, criterion, model0, model):
 
     # loss = entropys[values >= values0].mean(0)
     # print("len", len(close_ind), len(open_ind))
+    loss = 0
     if len(close_ind) != 0:
         loss = entropys[close_ind].mean(0)
     if len(open_ind) != 0:
