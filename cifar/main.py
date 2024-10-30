@@ -22,7 +22,8 @@ import eata
 import ostta
 import norm
 import tent
-import ostta_ema
+import ostta_neigh
+import ostta_neigh_memory
 import kmeans
 import oslpp
 
@@ -47,7 +48,8 @@ parser.add_argument(
         "tent",
         "eata",
         "ostta",
-        "ostta_ema",
+        "ostta_neigh",
+        "ostta_neigh_memory",
         "kmeans",
         "oslpp",
     ],
@@ -238,11 +240,11 @@ def evaluate():
             criterion=args.criterion,
         )
 
-    elif args.adaptation == "ostta_ema":
-        base_model = ostta_ema.configure_model(base_model)
-        params, param_names = ostta_ema.collect_params(base_model)
+    elif args.adaptation == "ostta_neigh":
+        base_model = ostta_neigh.configure_model(base_model)
+        params, param_names = ostta_neigh.collect_params(base_model)
         optimizer = setup_optimizer(params)
-        model = ostta_ema.OSTTA_EMA(
+        model = ostta_neigh.OSTTA_NEIGH(
             base_model,
             optimizer,
             steps=args.steps,
@@ -250,6 +252,20 @@ def evaluate():
             alpha=args.alpha,
             criterion=args.criterion,
             gamma=args.gamma,
+        )
+    elif args.adaptation == "ostta_neigh_memory":
+        base_model = ostta_neigh_memory.configure_model(base_model)
+        params, param_names = ostta_neigh_memory.collect_params(base_model)
+        optimizer = setup_optimizer(params)
+        model = ostta_neigh_memory.OSTTA_NEIGH(
+            base_model,
+            optimizer,
+            steps=args.steps,
+            episodic=args.episodic,
+            alpha=args.alpha,
+            criterion=args.criterion,
+            gamma=args.gamma,
+            nr=args.nr,
         )
     elif args.adaptation == "kmeans":
 
@@ -264,7 +280,7 @@ def evaluate():
             alpha=args.alpha,
             criterion=args.criterion,
             n_cluster=args.n_cluster,
-            nr=args.nr
+            nr=args.nr,
         )
     elif args.adaptation == "oslpp":
 
