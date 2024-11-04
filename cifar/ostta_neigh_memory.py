@@ -10,7 +10,8 @@ from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
 from sklearn.neighbors import KNeighborsClassifier
 
-1
+
+
 
 
 class MyQueue:
@@ -80,7 +81,9 @@ class OSTTA_NEIGH(nn.Module):
         self.alpha = alpha
         self.gamma = gamma
         self.criterion = criterion
-        self.queue = MyQueue(1000, 128)
+        
+        # 原来时1000
+        self.queue = MyQueue(2000,128)
         self.model0 = deepcopy(self.model)
         self.nr = nr
         for param in self.model0.parameters():
