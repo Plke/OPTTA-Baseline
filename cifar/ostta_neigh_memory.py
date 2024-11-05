@@ -11,9 +11,6 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.neighbors import KNeighborsClassifier
 
 
-
-
-
 class MyQueue:
     def __init__(self, max_len, dim):
         self.max_len = max_len
@@ -81,9 +78,9 @@ class OSTTA_NEIGH(nn.Module):
         self.alpha = alpha
         self.gamma = gamma
         self.criterion = criterion
-        
+
         # 原来时1000
-        self.queue = MyQueue(2000,128)
+        self.queue = MyQueue(2000, 128)
         self.model0 = deepcopy(self.model)
         self.nr = nr
         for param in self.model0.parameters():
