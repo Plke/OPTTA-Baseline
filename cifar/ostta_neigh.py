@@ -23,6 +23,7 @@ class OSTTA_NEIGH(nn.Module):
         alpha=[0.5],
         criterion="ent",
         gamma=0.99,
+        nr=2,
     ):
         super().__init__()
         self.model = model
@@ -33,7 +34,7 @@ class OSTTA_NEIGH(nn.Module):
         self.alpha = alpha
         self.gamma = gamma
         self.criterion = criterion
-
+        self.nr = nr
         self.model0 = deepcopy(self.model)
         for param in self.model0.parameters():
             param.detach()
@@ -50,7 +51,13 @@ class OSTTA_NEIGH(nn.Module):
 
         for _ in range(self.steps):
             outputs = forward_and_adapt(
-                x, self.optimizer, self.alpha, self.criterion, self.model0, self.model
+                x,
+                self.optimizer,
+                self.alpha,
+                self.criterion,
+                self.model0,
+                self.model,
+                self.nr,
             )
 
         return outputs
@@ -64,7 +71,7 @@ class OSTTA_NEIGH(nn.Module):
 
 
 @torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, optimizer, alpha, criterion, model0, model):
+def forward_and_adapt(x, optimizer, alpha, criterion, model0, model, nr):
     """Forward and adapt model on batch of data.
 
     Measure entropy of the model prediction, take gradients, and update params.
@@ -87,15 +94,42 @@ def forward_and_adapt(x, optimizer, alpha, criterion, model0, model):
     nbrs = NearestNeighbors(n_neighbors=2)
     nbrs.fit(features)
     _, indices = nbrs.kneighbors(features)
+    # cpu_labels = labels.detach().cpu().numpy()
+    # knn = KNeighborsClassifier(weights="distance", n_neighbors=nr).fit(
+    #     features, cpu_labels
+    # )
+    # pred = knn.predict(features)
     close_ind = []
     open_ind = []
 
     for i in range(outputs.size(0)):
         # 得到距离样本i，最近的样本
-        if values[i] >= values0[i] and labels[i] == labels[indices[i][1]]:
+        if values[i] >= values0[i]:
+            # if values[i] >= values0[i] and labels[i] == labels[indices[i][1]]:
             close_ind.append(i)
-        elif values[i] < values0[i] and labels[i] != labels[indices[i][1]]:
+        if labels[i] != labels[indices[i][1]]:
+            # elif values[i] < values0[i] and labels[i] != labels[indices[i][1]]:
             open_ind.append(i)
+
+    # half_len = x.shape[0] / 2
+    # # 展示
+    # print(
+    #     "预测闭集的样本个数:",
+    #     len(close_ind),
+    #     "闭集预测正确的数量：",
+    #     len(list(filter(lambda a: a < x.shape[0] / 2, close_ind))),
+    #     "闭集中正确率",
+    #     len(list(filter(lambda a: a < x.shape[0] / 2, close_ind))) / half_len,
+    # )
+    # print(
+    #     "预测开集的样本个数:",
+    #     len(open_ind),
+    #     "开集预测正确的数量：",
+    #     len(list(filter(lambda a: a >= x.shape[0] / 2, open_ind))),
+    #     "开集正确率",
+    #     len(list(filter(lambda a: a >= x.shape[0] / 2, open_ind))) / half_len,
+    # )
+    # print("---------------------------------------------------------")
 
     # adapt
     entropys = softmax_entropy(outputs)

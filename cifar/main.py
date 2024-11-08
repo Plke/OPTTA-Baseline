@@ -252,6 +252,7 @@ def evaluate():
             alpha=args.alpha,
             criterion=args.criterion,
             gamma=args.gamma,
+            nr=args.nr,
         )
     elif args.adaptation == "ostta_neigh_memory":
         base_model = ostta_neigh_memory.configure_model(base_model)
@@ -266,6 +267,7 @@ def evaluate():
             criterion=args.criterion,
             gamma=args.gamma,
             nr=args.nr,
+
         )
     elif args.adaptation == "kmeans":
 

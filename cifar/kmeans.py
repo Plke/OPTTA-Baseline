@@ -22,7 +22,7 @@ class MyQueue:
         self.max_len = max_len
         self.dim = dim
         self.len = 0
-        self.data = np.zeros([max_len, dim])
+        self.data = np.zeros([max_len, dim],dtype=np.float32)
         self.index = 0
 
     def add(self, x):
@@ -134,63 +134,18 @@ def softmax_mean_entropy(x: torch.Tensor) -> torch.Tensor:
     return -(x * torch.log(x)).sum()
 
 
-@torch.enable_grad()  # ensure grads in possible no grad context for testing
-def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr, queue):
-    """Forward and adapt model on batch of data.
-
-    Measure entropy of the model prediction, take gradients, and update params.
+def compute_average_distances(feature_map, labels, centers, n_cluster):
     """
-    # # forward
-    # features = model0(x)
+    计算每个类别所有样本到该类别中心的平均距离。
 
-    # # feature_map = features.detach().cpu().numpy()
-    # # result = PCA(n_components=10).fit_transform(feature_map)
-    # # print(feature_map.shape)
-    # # kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto").fit(result)
+    :param feature_map: 特征向量，形状为 (n_samples, n_features)
+    :param labels: 每个样本的类别标签，形状为 (n_samples,)
+    :param centers: 每个类别的中心，形状为 (n_clusters, n_features)
+    :param n_cluster: 类别数量
+    :return: 每个类别的平均距离，形状为 (n_clusters,)
+    """
+    average_distances = np.zeros(n_cluster)
 
-    # # 使用kmeans分为类别数个类，然后选择每个类别中距离中心点最近的nr个样本作为闭集样本进行训练
-    # # 问题: 1000个类，200个测试样本，全选上了
-
-    # kmeans = KMeans(n_clusters=n_cluster, mode="euclidean", verbose=1)
-
-    # labels = kmeans.fit_predict(features)
-    # centers = kmeans.centroids
-
-    # closest_sample_indices = []
-    # for i in range(n_cluster):
-    #     # 找到属于第i个类别的样本的索引
-    #     # cluster_i_indices = np.where(labels == i)[0]
-    #     cluster_i_indices = torch.where(labels == i)[0]
-    #     distances = torch.norm(features[cluster_i_indices]-centers[i], dim=1)
-    #     # 计算这些样本到中心点的距离
-    #     # distances = np.linalg.norm(result[cluster_i_indices] - centers[i], axis=1)
-
-    #     # 根据距离排序并选择最近的10个样本的索引
-    #     closest_indices = torch.argsort(distances)[:nr]
-    #     closest_sample_indices.append(cluster_i_indices[closest_indices])
-
-    # # print(closest_sample_indices)
-    # outputs = model(x)
-    # close_set_index = torch.cat(closest_sample_indices)
-
-    # forward
-    features = model0(x)
-
-    feature_map = features.detach().cpu().numpy()
-
-    queue.add(feature_map)
-
-    # result = PCA(n_components=10).fit_transform(feature_map)
-    # print(feature_map.shape)
-    kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto")
-
-    # 使用kmeans分为类别数个类，然后选择每个类别中距离中心点最近的nr个样本作为闭集样本进行训练
-    # 问题: 1000个类，200个测试样本，全选上了
-
-    labels = kmeans.fit_predict(queue.get())
-    centers = kmeans.cluster_centers_
-
-    closest_sample_indices = []
     for i in range(n_cluster):
         # 找到属于第i个类别的样本的索引
         cluster_i_indices = np.where(labels == i)[0]
@@ -201,15 +156,76 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr, queue):
         # 计算这些样本到中心点的距离
         distances = np.linalg.norm(feature_map[cluster_i_indices] - centers[i], axis=1)
 
-        # 根据距离排序并选择最近的 nr 个样本的索引
-        if len(cluster_i_indices) < nr:
-            closest_indices =   np.argsort(distances)[:]
-        else:
-            closest_indices = np.argsort(distances)[:nr]
-        closest_sample_indices.append(cluster_i_indices[closest_indices])
+        # 计算平均距离
+        average_distance = np.mean(distances)
+        average_distances[i] = average_distance
 
+    return average_distances
+
+
+@torch.enable_grad()  # ensure grads in possible no grad context for testing
+def forward_and_adapt(x, model0, model, optimizer, alpha, n_cluster, nr, queue):
+    """Forward and adapt model on batch of data.
+
+    Measure entropy of the model prediction, take gradients, and update params.
+    """
+
+    # forward
+    features = model0(x)
+    feature_map = np.array(features.detach().cpu(),dtype=np.float32)
+    # queue.add(feature_map)
+
+    # result = PCA(n_components=10).fit_transform(feature_map)
+    # print(feature_map.shape)
+    all_data = queue.get()
+    if all_data.shape[0] == 0:
+        all_data = feature_map
+    # labels = kmeans.fit_predict(feature_map)
+    kmeans = KMeans(n_clusters=n_cluster, random_state=9, n_init="auto")
+    all_labels = kmeans.fit_predict(all_data)
+    centers = kmeans.cluster_centers_
+    average_distances = compute_average_distances(
+        all_data, all_labels, centers, n_cluster
+    )
+
+    labels = kmeans.predict(feature_map)
+
+    closest_sample_indices = []
+    for i in range(n_cluster):
+        # 找到属于第i个类别的样本的索引
+        cluster_i_indices = np.where(labels == i)[0]
+        # print("cluster_i_indices",cluster_i_indices)
+
+        if len(cluster_i_indices) == 0:
+            continue
+
+        # 计算这些样本到中心点的距离
+
+        distances = np.linalg.norm(feature_map[cluster_i_indices] - centers[i], axis=1)
+        # print("distances",distances)
+        closest_sample_indices.append(
+            cluster_i_indices[distances < average_distances[i]]
+        )
+        # print(" cluster_i_indices[distances < average_distances[i]]", cluster_i_indices[distances < average_distances[i]])
+
+        # distances = np.linalg.norm(feature_map[cluster_i_indices] - centers[i], axis=1)
+
+        # closest_sample_indices.append()
+        # # 根据距离排序并选择最近的 nr 个样本的索引
+        # if len(cluster_i_indices) < nr:
+        #     closest_indices = np.argsort(distances)[:]
+        # else:
+        #     closest_indices = np.argsort(distances)[:nr]
+
+        # closest_sample_indices.append(cluster_i_indices[closest_indices])
+
+    # print(111, (closest_sample_indices))
     close_set_index = np.concatenate(closest_sample_indices)
+    queue.add(feature_map[close_set_index])
+    # print(222, (close_set_index).shape)
     outputs = model(x)
+    # print(333, outputs.shape)
+
     close_set_data = outputs[close_set_index]
 
     other_data = outputs[~close_set_index]
