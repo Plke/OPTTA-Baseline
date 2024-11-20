@@ -26,6 +26,7 @@ import ostta_neigh
 import ostta_neigh_memory
 import kmeans
 import oslpp
+import entropy
 
 from data import load_svhn, load_svhn_c
 from utils import AverageMeter, get_logger, set_random_seed
@@ -48,6 +49,7 @@ parser.add_argument(
         "tent",
         "eata",
         "ostta",
+        "entropy",
         "ostta_neigh",
         "ostta_neigh_memory",
         "kmeans",
@@ -99,6 +101,8 @@ parser.add_argument("--gamma", default=0.99, type=float)
 parser.add_argument("--nr", default=3, type=int)
 parser.add_argument("--n_cluster", default=10, type=int)
 
+# entropy
+parser.add_argument("--thresh_hold", default=0.5, type=float)
 
 args = parser.parse_args()
 
@@ -120,7 +124,7 @@ args.type = [
     "jpeg_compression",
 ]
 args.severity = [5]
-args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_ncluster_{}_nr_{}.txt".format(
+args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_ncluster_{}_nr_{}_thresh_hold_{}.txt".format(
     args.adaptation,
     args.dataset,
     args.lr,
@@ -129,6 +133,7 @@ args.log_dest = "{}_{}_lr_{}_alpha_{}_{}_gamma_{}_ncluster_{}_nr_{}.txt".format(
     args.gamma,
     args.n_cluster,
     args.nr,
+    args.thresh_hold
 )
 args.ap = 0.92 if args.dataset == "cifar10" else 0.72
 args.e_margin = (
@@ -253,6 +258,21 @@ def evaluate():
             criterion=args.criterion,
             gamma=args.gamma,
             nr=args.nr,
+        )
+    elif args.adaptation == "entropy":
+        base_model = entropy.configure_model(base_model)
+        params, param_names = entropy.collect_params(base_model)
+        optimizer = setup_optimizer(params)
+        model = entropy.ENTROPY(
+            base_model,
+            optimizer,
+            steps=args.steps,
+            episodic=args.episodic,
+            alpha=args.alpha,
+            criterion=args.criterion,
+            gamma=args.gamma,
+            nr=args.nr,
+            thresh_hold=args.thresh_hold,
         )
     elif args.adaptation == "ostta_neigh_memory":
         base_model = ostta_neigh_memory.configure_model(base_model)
