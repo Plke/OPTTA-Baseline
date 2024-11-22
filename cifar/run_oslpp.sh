@@ -18,9 +18,7 @@ for adaptation in oslpp; do
     for alpha1 in 1.0 0.5 0.1 0; do
         for alpha2 in 1.0 0.5 0.1 0; do
             for nr in 10 20 50; do
-                for orig in False True; do
-                    CUDA_VISIBLE_DEVICES=$gpu python main.py --adaptation $adaptation --dataset $dataset --save_dir "./output/oslpp" --alpha $alpha1 $alpha2 --orig $orig --nr $nr
-                done
+                    CUDA_VISIBLE_DEVICES=$gpu python main.py --adaptation $adaptation --dataset $dataset --save_dir "./output/oslpp" --alpha $alpha1 $alpha2  --nr $nr
             done
         done
     done

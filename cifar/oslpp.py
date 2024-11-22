@@ -7,6 +7,9 @@ import torch.jit
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
+import time
 
 
 class Tent_oslpp(nn.Module):
@@ -116,10 +119,22 @@ def forward_and_adapt(x, model0, model, optimizer, alpha, nr):
     """
     # forward
     loss = 0
-    
+
     features = model0(x)
     features = features.detach().cpu().numpy()
-    
+    output = model(x)
+    labels = torch.argmax(output, dim=1)
+    labels = labels.cpu().detach().numpy()
+    labels[100:] = 10
+
+    x_tsne = TSNE(n_components=2).fit_transform(features)
+    plt.figure(figsize=(8, 8))
+    for i in range(len(np.unique(labels))):  # 假设labels是样本的标签数组
+        plt.scatter(x_tsne[labels == i, 0], x_tsne[labels == i, 1], label=f"Class {i}")
+    plt.legend()
+    plt.savefig("t_sne_plot.png")  # 保存图像到文件
+    plt.show()
+    time.sleep(20)
 
     # 原域的计算类的均值,使用原模型实现
     classes = outputs.shape[1]
